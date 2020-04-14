@@ -5,6 +5,10 @@ esphome:
   name: quad_alpha_display_custom
   platform: ESP32
   board: esp32doit-devkit-v1
+  on_boot:
+    then:
+      - lambda: |-
+          id(knob).set_value(id(countdown));
 
 wifi:
   ssid: !secret wifi_ssid
@@ -45,24 +49,23 @@ globals:
   - id: rotary_encoder_mode
     type: int
     initial_value: '0'
-  - id: case_2_encoder
-    type: int
-    initial_value: '2'
   - id: countdown
     type: int
     restore_value: no
-    initial_value: '10'
-  - id: hold_display_timer
-    type: int
-    initial_value: '0'
+    initial_value: '20'
 
 binary_sensor:
+  #******************************************************************************
+  # Push button on rotary encoder
+  # ESPHome docs: https://esphome.io/components/binary_sensor/index.html
+  #******************************************************************************
   # This sensor is the push switch built into the shaft of the rotary encoder
   # Each press cycles through the "rotary_encoder_mode" where each mode allows control of a different device
   # Currently:
   #   Mode 1 = Countdown time for iron switch
   #   Mode 2 = Brightness of HT16K33 I2C 4-digit LED display: Range 0.0-1.0
-  #   Mode 3 = Spare, not implemented
+  #   Mode 3 = Idle state - counter has reached zero and display turned off
+  #******************************************************************************
   - platform: gpio
     internal: true
     id: rotary_push
@@ -72,23 +75,43 @@ binary_sensor:
       mode: INPUT_PULLUP
     filters:
       - delayed_on: 50ms # debounce
-    on_press:
+    on_click:
+    - min_length: 50ms
+      max_length: 300ms
       then:
         - lambda: |-
-            if (++id(rotary_encoder_mode) == 3)
-              id(rotary_encoder_mode) = 1;
-            switch (id(rotary_encoder_mode)) {
-              case 1:
-                break;
-              case 2:
-                // Restore previously set brightness
-                id(knob).set_value(id(case_2_encoder));
-                break;
-              default:
-                id(rotary_encoder_mode) = 0;
-                break;
+            const int SET_TIMER_MODE = 0, COUNTDOWN_MODE = 1, SET_BRIGHTNESS_MODE = 2, IDLE_MODE = 3;
+            // Turn display ON whenever user pushes the encoder button
+            id(led_display).set_brightness(id(led_brightness));
+            if (id(rotary_encoder_mode) == SET_TIMER_MODE) {
+              id(rotary_encoder_mode) = COUNTDOWN_MODE;
+              // set countdown time to current rotatry encoder
+              id(countdown) = (int) (id(knob).state * 15.0);
             }
-            id(hold_display_timer) = 2;
+            else if ((id(rotary_encoder_mode) == SET_BRIGHTNESS_MODE) || (id(rotary_encoder_mode) == IDLE_MODE)) {
+              id(rotary_encoder_mode) = SET_TIMER_MODE; // Enter 'set timer mode'
+              id(knob).set_value(20); // Set encoder initial value to 20 * 15 sec = 5 minutes
+              id(led_display).update();
+            }
+        - if:
+            condition:
+              # Turn the iron switch on when the countdown timer is first set to a value
+              lambda: 'return (id(rotary_encoder_mode) == 1) && (id(countdown) > 0);'
+            then:
+              - logger.log: "Timer started ==> Turn switch ON"
+              - homeassistant.service:
+                  service: switch.turn_on
+                  data:
+                    entity_id: $switch_name
+    - min_length: 600ms
+      max_length: 2s
+      then:
+        - lambda: |-
+            // change mode to set LED display brightness
+            id(rotary_encoder_mode) = 2;
+            // Restore previously set brightness
+            int prev_brightness = (int) (id(led_display).get_brightness() * 10.0);
+            id(knob).set_value(prev_brightness);
             id(led_display).update();
 
 sensor:
@@ -103,37 +126,31 @@ sensor:
     pin_b: GPIO4
     resolution: 2
     min_value: 0
-    max_value: 72 # 6 minutes max
+    max_value: 28 # 7 minutes max
     filters:
       - debounce: 50ms # debounce the encoder wafers
       - throttle: 100ms # limit updates if the user twists the encoder too fast :D
     on_value:
       then:
         - lambda: |-
+            const int SET_TIMER_MODE = 0, COUNTDOWN_MODE = 1, SET_BRIGHTNESS_MODE = 2, IDLE_MODE = 3;
             ESP_LOGW("rotary", "rotary enc=%2.2f", x);
-            switch (id(rotary_encoder_mode)) {
-              case 0:
-                id(rotary_encoder_mode) = 1;
-                id(knob).set_value(1);
-                id(countdown) = 1;
-                id(hold_display_timer) = 2;
-                break;
-              case 1:
-                // Use the rotary encoder to set the iron switch countdown time in mm:ss
-                // Encoder is 0-360 seconds, or 0-6 minutes
-                id(countdown) = (int) (x * 5.0);
-                break;
-              case 2:
-                // Use the rotary encoder to set the brightness of the lcd_ht16k33 LED display
-                // Encoder is 0-10, results in brightness of 0.0-1.0
-                if (x > 10.0)
-                  x = 10.0;
-                id(case_2_encoder) = (int) x;
-                id(led_brightness) = x / 10.0;
-                ESP_LOGW("case 2: LED brightness", "brightness=%.1f", id(led_brightness));
-                break;
-              default:
-                break;
+            
+            // Turn display ON whenever user moves the encoder
+            id(led_display).set_brightness(id(led_brightness));
+            
+            if (id(rotary_encoder_mode) == SET_BRIGHTNESS_MODE) {
+              // Use the rotary encoder to set the brightness of the lcd_ht16k33 LED display [0.0 - 1.0]
+              if (x > 10.0)
+                x = 10.0;
+              id(led_brightness) = x / 10.0;
+              id(led_display).set_brightness(id(led_brightness));
+              ESP_LOGW("case 2: LED brightness", "brightness=%.1f", id(led_brightness));
+            }
+            else if ((id(rotary_encoder_mode) == COUNTDOWN_MODE) || (id(rotary_encoder_mode) == IDLE_MODE)) {
+              // While countdown is in progress, use rotary encoder to change the current countdown value (up or down)
+              id(knob).set_value((float) (id(countdown) / 15.0)); // set the encoder to current countdown value
+              id(rotary_encoder_mode) = SET_TIMER_MODE;
             }
             // Force display to update immediately, instead of waiting 1sec for the display update_interval
             id(led_display).update();
@@ -148,32 +165,29 @@ display:
     scroll_delay: 3.0
     id: led_display
     lambda: |-
+      const int SET_TIMER_MODE = 0, COUNTDOWN_MODE = 1, SET_BRIGHTNESS_MODE = 2, IDLE_MODE = 3;
       int mins = 0;
       int secs = 0;
+      int encoder = (int) (id(knob).state * 15.0); // Display in 15 second increments
       switch (id(rotary_encoder_mode)) {
-        case 1:
-          if (id(hold_display_timer) > 0) {
-            id(hold_display_timer)--;
-            id(led_display).printf("%s", "Timer");
-          }
-          else {
-            if (id(countdown) > 0 ) {
-              id(countdown)--;
-              secs = id(countdown) % 60;
-              mins = (id(countdown) - secs) / 60;
-              it.printf("%2d.%02d", mins, secs);
-            }
+        case SET_TIMER_MODE:
+          // Set countdown timer - just display, don't countdown
+          secs = encoder % 60;
+          mins = (encoder - secs) / 60;
+          if (encoder > 0)
+            it.printf("%2d.%02d", mins, secs);
+          break;
+        case COUNTDOWN_MODE:
+          if (id(countdown) > 0 ) {
+            id(countdown)--;
+            secs = id(countdown) % 60;
+            mins = (id(countdown) - secs) / 60;
+            it.printf("%2d.%02d", mins, secs);
           }
           break;
-        case 2:
+        case SET_BRIGHTNESS_MODE:
           it.set_brightness(id(led_brightness));
-          if (id(hold_display_timer) > 0) {
-            id(hold_display_timer)--;
-            id(led_display).printf("%s", "Brightness");
-          }
-          else {
-            it.printf("%.1f", id(led_brightness));
-          }
+          it.printf("Brightness %.1f", id(led_brightness));
           break;
       }
 
@@ -183,22 +197,39 @@ interval:
       - if:
           condition:
             # Turn the iron switch off when the countdown reaches zero
-            lambda: 'return (id(countdown) == 0) && (id(rotary_encoder_mode) == 1) && (id(hold_display_timer) == 0);'
+            lambda: 'return (id(countdown) == 0) && (id(rotary_encoder_mode) == 1);'
           then:
-            - logger.log: "Countdown is zero"
+            - logger.log: "Countdown reached zero ==> Turn switch OFF"
             - homeassistant.service:
                 service: switch.turn_off
                 data:
                   entity_id: $switch_name
             - lambda: |-
-                id(rotary_encoder_mode) = 0;
+                id(rotary_encoder_mode) = 3;
       - if:
           condition:
-            # Turn the iron switch on when the countdown timer is first set to a value
-            lambda: 'return (id(countdown) > 0) && (id(rotary_encoder_mode) == 1) && (id(hold_display_timer) == 0);'
+            # Turn the iron switch off if user turned encoder to zero
+            lambda: 'return (id(knob).state == 0.0) && ((id(rotary_encoder_mode) == 0) || (id(rotary_encoder_mode) == 1));'
           then:
-            - logger.log: "Countdown is > 0"
+            - logger.log: "User adjusted encoder to zero ==> Turn switch OFF"
             - homeassistant.service:
-                service: switch.turn_on
+                service: switch.turn_off
                 data:
                   entity_id: $switch_name
+            - lambda: |-
+                id(rotary_encoder_mode) = 3;
+                id(countdown) = 0;
+  - interval: 30sec
+    then:
+      # turn display off if encoder not moved for xx seconds
+      - lambda: |-
+          const int SET_TIMER_MODE = 0, COUNTDOWN_MODE = 1, SET_BRIGHTNESS_MODE = 2, IDLE_MODE = 3;
+          static int old_encoder = 0;
+          if ((id(rotary_encoder_mode) != COUNTDOWN_MODE) && (old_encoder == id(knob).state)) {
+            //ESP_LOGW("interval", "Encoder same for 30 seconds");
+            id(led_display).set_brightness(0.0);
+          }
+          else {
+            //ESP_LOGW("interval", "Encoder different or counting down");
+            old_encoder = id(knob).state;
+          }
