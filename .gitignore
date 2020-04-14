@@ -7,7 +7,3 @@
 
 # MacOS files
 .DS_Store
-
-# Git related files - a bit meta!!
-.gitifnore
-.gitattributes
