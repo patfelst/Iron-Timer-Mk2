@@ -2,7 +2,7 @@
 ## ESPHome based Iron Timer
 Never forget to turn your clothes iron off again! Plug your clothes iron into a WiFi power switch which you've previously integrated into Home Assistant (HA). A rotary encoder allows you to input countdown time in minutes and seconds. Press the encoder button down, and the timer starts counting down. When it reaches zero, it instructs HA to switch off the iron. A 14-segment alphanumeric LED display shows the selected and remaining time.
 
-![cct_diagram](/Circuit_diagram_Iron_Timer.png "Iron timer circuit diagram")
+![cct_diagram](/Circuit_diagram_Iron_Timer.svg "Iron timer circuit diagram")
 
 ## Detailed description:
 1. Use a rotary encoder to select number of minutes on LED display. Starts at 5:00 (m:ss). Adjusts in 15s increments. Max 7:00.
