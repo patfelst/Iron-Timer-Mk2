@@ -16,9 +16,9 @@ Choice of "Non Powered" (3 examples below) **or** "Powered" (2 examples below)
 - Powered, do not fit external pullup resistors: [PiHut](https://thepihut.com/products/keyes-rotary-encoder-module "PiHut")
 - Powered, do not fit external pullup resistors: [Waveshare](https://www.waveshare.com/rotation-sensor.htm "Waveshare")
 
-Note 1: The rotary encoder I used needs two external pullup resistors (2x 47k Ohm) because the ESPHome rotary encoder platform is coded for the type of encoders that are powered (i.e you provide power and ground to them), so it does not enable the ESP internal pullup resistors. **If you buy an encoder that is powered, do NOT fit the external pullup resistors.**
+Note 1: The rotary encoder I used from Jaycar produces 15 pulses per revolution. It needs two external pullup resistors (2x 47k Ohm) because the ESPHome rotary encoder platform is coded for the type of encoders that are powered (i.e you provide power and ground to them), so it does not enable the ESP internal pullup resistors. **If you buy an encoder that is powered, do NOT fit the external pullup resistors.** You may need to modify the code if the number of pulses per revolution is different to Jaycar item I used.
 
-Note 2: Having said all that, the push button built into the encoder (activates when you push down on the shaft) does NOT need an external pullup resistor as you just configure it as a normal GPIO switch in ESPHome with pullup enabled (see purple wire which goes to GPIO0).
+Note 2: Having said all that, the push button built into the encoder (activates when you push down on the shaft) does NOT need an external pullup resistor as you just configure it as a normal GPIO binary sensor in ESPHome with pullup enabled (see purple wire which goes to GPIO0).
 #### Display
 I2C 0.54" Quad Alphanumeric Display - [Adafruit](https://www.adafruit.com/product/1911 "Adafruit"), or [Chinese knockoff](https://www.banggood.com/4-bit-Pozidriv-0_54-Inch-14-segment-LED-Digital-Tube-Module-Red-Green-I2C-Control-2-line-Control-LED-Display-Screen-Module-p-1546304.html?rmmds=search&ID=6157216&cur_warehouse=CN "Chinese knockoff")
 #### ESP32
@@ -31,7 +31,7 @@ ESP32 development board (many options) - I used the Espressif [ESP32 DevKitC V4]
 2. Press button on rotary encoder to start countdown timer.
 3. When countdown finishes, HA switches the iron off.
 4. LED display turns off and enters idle state.
-5. Adjust LED display brightness at any time by press and hold encoder button for < 0.6seconds, then select beteween 0.1 and 1.0
+5. Adjust LED display brightness at any time by press and hold encoder button for > 0.6 seconds < 2.0 seconds, then select beteween 0.1 and 1.0
 6. To finish countdown early, double click encoder button. Switch turns off immeditely.
 7. To add or remove time during countdown, simply twist the encoder in steps of 15s.
 8. When device is idle, user can tap rotary encoder switch to wake up device, which resets to 5:00 minutes.
