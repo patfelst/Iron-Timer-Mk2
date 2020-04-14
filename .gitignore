@@ -1,10 +1,6 @@
 # Folders
 photos/
 
-# JPEG
-*.jpg
-*.jpeg
-
 # GIMP image files
 *.xcf
 
