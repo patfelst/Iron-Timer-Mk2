@@ -20,6 +20,8 @@
 #   9. Display turns off (enters idle mode) if user does not perform an action wihtin 30 seconds.
 #
 # Code by Patrick Felstead
+# v3  12-Apr-2020   Initial release 
+# v4  13-Apr-2020   Prevent user selecting brightness < 0.1. Move WiFi credentials to secrets.yaml
 #******************************************************************************
 substitutions:
   #switch_name: switch.front_lounge_lamp
