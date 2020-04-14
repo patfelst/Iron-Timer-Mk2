@@ -36,8 +36,6 @@ esphome:
       - sensor.rotary_encoder.set_value:
           id: knob
           value: !lambda 'return (float) id(countdown);'
-      # Force display to update immediately, instead of waiting 1sec for the display update_interval
-      - component.update: led_display
 
 wifi:
   ssid: !secret wifi_ssid
