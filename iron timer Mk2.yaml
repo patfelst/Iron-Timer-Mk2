@@ -1,0 +1,204 @@
+substitutions:
+  switch_name: switch.front_lounge_lamp
+
+esphome:
+  name: quad_alpha_display_custom
+  platform: ESP32
+  board: esp32doit-devkit-v1
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: 192.168.0.25
+    gateway: 192.168.0.1
+    subnet: 255.255.255.0
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Quad Alpha Display Custom"
+    password: "Dzqy205310T2"
+
+captive_portal:
+
+# Enable logging
+logger:
+  # level: INFO
+  level: DEBUG
+  logs:
+    sensor: WARN
+    adc: WARN
+
+# Enable Home Assistant API
+api:
+
+ota:
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+
+globals:
+  - id: led_brightness
+    type: float
+    initial_value: '0.2'
+  - id: rotary_encoder_mode
+    type: int
+    initial_value: '0'
+  - id: case_2_encoder
+    type: int
+    initial_value: '2'
+  - id: countdown
+    type: int
+    restore_value: no
+    initial_value: '10'
+  - id: hold_display_timer
+    type: int
+    initial_value: '0'
+
+binary_sensor:
+  # This sensor is the push switch built into the shaft of the rotary encoder
+  # Each press cycles through the "rotary_encoder_mode" where each mode allows control of a different device
+  # Currently:
+  #   Mode 1 = Countdown time for iron switch
+  #   Mode 2 = Brightness of HT16K33 I2C 4-digit LED display: Range 0.0-1.0
+  #   Mode 3 = Spare, not implemented
+  - platform: gpio
+    internal: true
+    id: rotary_push
+    pin:
+      number: GPIO0
+      inverted: true
+      mode: INPUT_PULLUP
+    filters:
+      - delayed_on: 50ms # debounce
+    on_press:
+      then:
+        - lambda: |-
+            if (++id(rotary_encoder_mode) == 3)
+              id(rotary_encoder_mode) = 1;
+            switch (id(rotary_encoder_mode)) {
+              case 1:
+                break;
+              case 2:
+                // Restore previously set brightness
+                id(knob).set_value(id(case_2_encoder));
+                break;
+              default:
+                id(rotary_encoder_mode) = 0;
+                break;
+            }
+            id(hold_display_timer) = 2;
+            id(led_display).update();
+
+sensor:
+  #******************************************************************************
+  # Rotary encoder
+  # ESPHome docs: https://esphome.io/components/sensor/rotary_encoder.html
+  #******************************************************************************
+  - platform: rotary_encoder
+    name: "Rotary Encoder"
+    id: knob
+    pin_a: GPIO2
+    pin_b: GPIO4
+    resolution: 2
+    min_value: 0
+    max_value: 72 # 6 minutes max
+    filters:
+      - debounce: 50ms # debounce the encoder wafers
+      - throttle: 100ms # limit updates if the user twists the encoder too fast :D
+    on_value:
+      then:
+        - lambda: |-
+            ESP_LOGW("rotary", "rotary enc=%2.2f", x);
+            switch (id(rotary_encoder_mode)) {
+              case 0:
+                id(rotary_encoder_mode) = 1;
+                id(knob).set_value(1);
+                id(countdown) = 1;
+                id(hold_display_timer) = 2;
+                break;
+              case 1:
+                // Use the rotary encoder to set the iron switch countdown time in mm:ss
+                // Encoder is 0-360 seconds, or 0-6 minutes
+                id(countdown) = (int) (x * 5.0);
+                break;
+              case 2:
+                // Use the rotary encoder to set the brightness of the lcd_ht16k33 LED display
+                // Encoder is 0-10, results in brightness of 0.0-1.0
+                if (x > 10.0)
+                  x = 10.0;
+                id(case_2_encoder) = (int) x;
+                id(led_brightness) = x / 10.0;
+                ESP_LOGW("case 2: LED brightness", "brightness=%.1f", id(led_brightness));
+                break;
+              default:
+                break;
+            }
+            // Force display to update immediately, instead of waiting 1sec for the display update_interval
+            id(led_display).update();
+
+display:
+  - platform: lcd_ht16k33
+    address: 0x70
+    update_interval: 1s
+    scroll: true
+    scroll_speed: 200ms
+    scroll_dwell: 10s
+    scroll_delay: 3.0
+    id: led_display
+    lambda: |-
+      int mins = 0;
+      int secs = 0;
+      switch (id(rotary_encoder_mode)) {
+        case 1:
+          if (id(hold_display_timer) > 0) {
+            id(hold_display_timer)--;
+            id(led_display).printf("%s", "Timer");
+          }
+          else {
+            if (id(countdown) > 0 ) {
+              id(countdown)--;
+              secs = id(countdown) % 60;
+              mins = (id(countdown) - secs) / 60;
+              it.printf("%2d.%02d", mins, secs);
+            }
+          }
+          break;
+        case 2:
+          it.set_brightness(id(led_brightness));
+          if (id(hold_display_timer) > 0) {
+            id(hold_display_timer)--;
+            id(led_display).printf("%s", "Brightness");
+          }
+          else {
+            it.printf("%.1f", id(led_brightness));
+          }
+          break;
+      }
+
+interval:
+  - interval: 1sec
+    then:
+      - if:
+          condition:
+            # Turn the iron switch off when the countdown reaches zero
+            lambda: 'return (id(countdown) == 0) && (id(rotary_encoder_mode) == 1) && (id(hold_display_timer) == 0);'
+          then:
+            - logger.log: "Countdown is zero"
+            - homeassistant.service:
+                service: switch.turn_off
+                data:
+                  entity_id: $switch_name
+            - lambda: |-
+                id(rotary_encoder_mode) = 0;
+      - if:
+          condition:
+            # Turn the iron switch on when the countdown timer is first set to a value
+            lambda: 'return (id(countdown) > 0) && (id(rotary_encoder_mode) == 1) && (id(hold_display_timer) == 0);'
+          then:
+            - logger.log: "Countdown is > 0"
+            - homeassistant.service:
+                service: switch.turn_on
+                data:
+                  entity_id: $switch_name
