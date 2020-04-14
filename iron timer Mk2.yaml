@@ -6,8 +6,6 @@
 #   HA to switch off the iron. A 14-segment alphanumeric LED display shows the selected and
 #   remaining time.
 #
-#   Circuit diagram https://bit.ly/Iron_timer_diagram
-#
 # Function:
 #   1. Use a rotary encoder to select number of minutes on LED display. Starts at 5:00 (m:ss). Adjusts in 15s increments. Max 7:00.
 #   2. Press button on rotary encoder to start countdown timer.
@@ -22,8 +20,8 @@
 # Code by Patrick Felstead
 #******************************************************************************
 substitutions:
-  #switch_name: switch.front_lounge_lamp
-  switch_name: switch.bedroom_lamp
+  # Replace with Home Assistant entity ID for WiFi switch that controls the iron
+  switch_name: switch.front_lounge_lamp
 
 esphome:
   name: iron_timer_mk2
@@ -47,24 +45,23 @@ wifi:
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "Quad Alpha Display Custom"
+    ssid: "IronTimer"
     password: "Dzqy205310T2"
 
 captive_portal:
 
 # Enable logging
 logger:
-  # level: INFO
   level: DEBUG
   logs:
     sensor: WARN
-    adc: WARN
 
 # Enable Home Assistant API
 api:
 
 ota:
 
+# I2C pins for the HT16K33 I2C 4-digit LED display
 i2c:
   sda: GPIO21
   scl: GPIO22
@@ -73,10 +70,12 @@ globals:
   - id: led_brightness
     type: float
     initial_value: '0.3'
-  - id: rotary_encoder_mode
+  # Begin in Boot mode to display the project name
+    - id: rotary_encoder_mode
     type: int
     initial_value: '4'
-  - id: countdown
+  # Set the default time period to 5:00 minutes (20 * 15 seconds = 300 seconds = 5:00 m:ss)
+    - id: countdown
     type: int
     restore_value: no
     initial_value: '20'
@@ -90,11 +89,11 @@ binary_sensor:
   # ESPHome docs: https://esphome.io/components/binary_sensor/index.html
   #******************************************************************************
   # This sensor is the push switch built into the shaft of the rotary encoder
-  # Each press cycles through the "rotary_encoder_mode" where each mode allows control of a different device
-  # Currently:
-  #   Mode 1 = Countdown time for iron switch
-  #   Mode 2 = Brightness of HT16K33 I2C 4-digit LED display: Range 0.0-1.0
-  #   Mode 3 = Idle state - counter has reached zero and display turned off
+  # A short press wakes device from idle mode, or starts the countdown, or exits the set brightness mode
+  # A long press lets the user adjust the LED display brightness
+  # A double click during countdown will make the remaining time jump to near zero, i.e. the user wants to turn iron off immediately
+  #
+  # All modes are defined in "iron timer Mk2.h"
   #******************************************************************************
   - platform: gpio
     internal: true
@@ -124,7 +123,7 @@ binary_sensor:
             }
         - if:
             condition:
-              # Turn the iron switch on when the countdown timer is first set to a value
+              # Turn the iron switch on when the countdown timer is first set to a non-zero value
               lambda: 'return (id(rotary_encoder_mode) == COUNTDOWN_MODE) && (id(countdown) > 0);'
             then:
               - logger.log: "Timer started ==> Turn switch ON"
@@ -165,7 +164,8 @@ sensor:
     pin_b: GPIO4
     resolution: 2
     min_value: 0
-    # instead of 'max_value' limit max in lambda filter lambda so can adjust time upward during countdown when encoder already at max value
+    # instead of usng a 'max_value', instead limit the max in lambda filter.
+    # This is so can adjust time upward during countdown when encoder just below max value
     filters:
       - debounce: 50ms # debounce the encoder wafers
       - throttle: 100ms # limit updates if the user twists the encoder too fast :D
@@ -185,12 +185,12 @@ sensor:
             //ESP_LOGW("case 2: LED brightness", "brightness=%.1f", id(led_brightness));
           }
           else if ((id(rotary_encoder_mode) == COUNTDOWN_MODE) || (id(rotary_encoder_mode) == IDLE_MODE)) {
-            // While countdown is in progress, use rotary encoder to change the current countdown value (up or down)
+            // While countdown is in progress, use rotary encoder to adjust the current countdown value (up or down)
             x = round((float) id(countdown) / 15.0);
             id(rotary_encoder_mode) = SET_TIMER_MODE;
           }
           // Limit max encoder to 28 * 15 = 420s = 7 minutes
-          // Use this limit insead of encoder platform 'max_value' because if encoder already at max, won't trigger 'on_value'
+          // Use this limit insead of encoder platform 'max_value' because if encoder one click below max, won't trigger 'on_value' (ESPHome bug?)
           if (x >= 28.0)
             return 28.0;
           else
@@ -198,6 +198,7 @@ sensor:
     on_value:
       then:
         # This code sets the encoder to the current countdown value returned by the above filter
+        # Not sure why this can't be done in the filter lambda above, but it gets ignored there (compiles ok)
         # i.e. the 'on_value' is triggered by the new filtered value above, but has not been written to the current encoder value for subsequent encoder movement
         - sensor.rotary_encoder.set_value:
             id: knob
@@ -236,6 +237,7 @@ display:
             if (!id(shutdown_early))
               it.printf("%2d.%02d", mins, secs);
             else {
+              // Put an asterix in the first digit as another cue to the user that they requested an immediate end to the countdown
               it.printf("*%1d.%02d", mins, secs);
             }
           }
@@ -245,6 +247,7 @@ display:
           it.printf("Brightness %.1f", id(led_brightness));
           break;
         case BOOT_MSG_MODE:
+          // This message gets displayed once for 5 seconds after power on
           static int boot_timer = 0;
           if (boot_timer <= 5) {
             boot_timer++;
@@ -274,7 +277,7 @@ interval:
                 id(shutdown_early) = false;
       - if:
           condition:
-            # Turn the iron switch off if user turned encoder to zero
+            # Turn the iron switch off if user turned encoder all the way to zero during countdown
             lambda: 'return (id(knob).state == 0.0) && ((id(rotary_encoder_mode) == SET_TIMER_MODE) || (id(rotary_encoder_mode) == COUNTDOWN_MODE));'
           then:
             - logger.log: "User adjusted encoder to zero ==> Turn switch OFF"
@@ -288,7 +291,7 @@ interval:
                 id(shutdown_early) = false;
   - interval: 30sec
     then:
-      # turn display off if encoder not moved for xx seconds
+      # turn display off if encoder not moved for 30 seconds
       - lambda: |-
           static int old_encoder = 0;
           if ((id(rotary_encoder_mode) != COUNTDOWN_MODE) && (old_encoder == id(knob).state)) {
