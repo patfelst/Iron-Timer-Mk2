@@ -71,11 +71,11 @@ globals:
     type: float
     initial_value: '0.3'
   # Begin in Boot mode to display the project name
-    - id: rotary_encoder_mode
+  - id: rotary_encoder_mode
     type: int
     initial_value: '4'
   # Set the default time period to 5:00 minutes (20 * 15 seconds = 300 seconds = 5:00 m:ss)
-    - id: countdown
+  - id: countdown
     type: int
     restore_value: no
     initial_value: '20'
