@@ -1,3 +1,26 @@
+#******************************************************************************
+# ESPHome based Iron Timer
+#   Never forget to turn your clothes iron off again!
+#   Clothes iron is connected to a WiFi power switch controlled by Home Assistant (HA).
+#   A rotary encoder allows user to input countdown time, when the timer finishes, sends a message to 
+#   HA to switch off the iron. A 14-segment alphanumeric LED display shows the selected and
+#   remaining time.
+#
+#   Circuit diagram https://bit.ly/Iron_timer_diagram
+#
+# Function:
+#   1. Use a rotary encoder to select number of minutes on LED display. Starts at 5:00 (m:ss). Adjusts in 15s increments. Max 7:00.
+#   2. Press button on rotary encoder to start countdown timer.
+#   3. When countdown finishes, HA switches the iron off.
+#   4. LED display turns off and enters idle state.
+#   5. Adjust LED display brightness at any time by press and hold encoder button for < 0.6seconds, then select beteween 0.1 and 1.0
+#   6. To finish countdown early, double click encoder button. Switch turns off immeditely.
+#   7. To add or remove time during countdown, simply twist the encoder in steps of 15s.
+#   8. When device is idle, user can tap rotary encoder switch to wake up device, which resets to 5:00 minutes.
+#   9. Display turns off (enters idle mode) if user does not perform an action wihtin 30 seconds.
+#
+# Code by Patrick Felstead
+#******************************************************************************
 substitutions:
   #switch_name: switch.front_lounge_lamp
   switch_name: switch.bedroom_lamp
@@ -5,7 +28,7 @@ substitutions:
 esphome:
   name: iron_timer_mk2
   platform: ESP32
-  board: esp32doit-devkit-v1
+  board: esp32dev
   includes:
     - ./custom_components/Iron timer Mk2.h
   on_boot:
@@ -154,9 +177,11 @@ sensor:
           id(led_display).set_brightness(id(led_brightness));
           
           if (id(rotary_encoder_mode) == SET_BRIGHTNESS_MODE) {
-            // Use the rotary encoder to set the brightness of the lcd_ht16k33 LED display [0.0 - 1.0]
+            // Use the rotary encoder to set the brightness of the lcd_ht16k33 LED display [0.1 - 1.0]
             if (x > 10.0)
               x = 10.0;
+            else if (x < 1.0)
+              x = 1.0; // Prevent user selecting 0.0 as this turns display off
             id(led_brightness) = x / 10.0;
             id(led_display).set_brightness(id(led_brightness));
             //ESP_LOGW("case 2: LED brightness", "brightness=%.1f", id(led_brightness));
