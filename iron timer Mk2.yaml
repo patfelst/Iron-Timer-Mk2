@@ -21,7 +21,7 @@
 #******************************************************************************
 substitutions:
   # Replace with Home Assistant entity ID for WiFi switch that controls the iron
-  switch_name: switch.front_lounge_lamp
+  switch_name: switch.switch_iron
 
 esphome:
   name: iron_timer_mk2
